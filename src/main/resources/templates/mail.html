@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="zh">
+
+<head>
+    <title>邮箱验证</title>
+    <meta charset="utf-8">
+</head>
+
+<body>
+
+<div style="padding: 10px; background-color: #393D49;">
+    <h1 style="color: #FFFFFF; margin: 0;">The Land of StarLight</h1>
+</div>
+
+<div style="padding-top: 10px; padding-bottom: 10px;">
+    <div style="background-color: snow; padding: 20px;">
+        <div>
+            <h3>萌新玩家，您好！</h3>
+            <p>您现在正在进行TLSL账号的注册操作，为了验证您提供的邮箱有效且可用，我们将对您进行身份验证。</p>
+            <p th:text="${message}"></p>
+            <div>
+                <h4>本次的验证码为：</h4>
+                <div style="background-color: #EBEEF5; padding: 10px;">
+                    <h3 th:text="${code}"></h3>
+                </div>
+                <h4>有效期为5分钟</h4>
+            </div>
+            <p style="margin-top: 15px;">发件人：The Land of StarLight 验证服务</p>
+        </div>
+    </div>
+</div>
+
+<div style="padding: 10px; text-align: center; background-color: #2F4056;">
+    <p style="margin: 0; color: #FFFFFF;">Copyright © <span th:text="${year}"></span> <a href="https://www.starlight.cool/" style="color: #FFFFFF;">The Land of StarLight Team</a> All Rights Reserved.</p>
+</div>
+
+</body>
+</html>
