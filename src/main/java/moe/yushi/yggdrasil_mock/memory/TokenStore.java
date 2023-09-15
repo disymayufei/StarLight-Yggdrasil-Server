@@ -92,11 +92,18 @@ public class TokenStore {
 			.build();
 
 	private void removeToken(Token token) {
+		/*
+		 * 逻辑：从数据库中寻找相应的Token
+		 * 如果存在该Token，给删了
+		 */
 		accessToken2token.remove(token.accessToken);
 		lastAcquiredToken.remove(token.user, token);
 	}
 
 	public Optional<Token> authenticate(String accessToken, @Nullable String clientToken, AvailableLevel availableLevel) {
+		/*
+		 * 第一步替换成，从SQL数据库中拿数据
+		 */
 		var token = accessToken2token.getQuietly(accessToken);
 		if (token == null)
 			return empty();
@@ -167,6 +174,9 @@ public class TokenStore {
 		token.user = user;
 		token.id = tokenIdGen.getAndIncrement();
 
+		/*
+		 * 这里换成往MySQL中塞数据
+		 */
 		accessToken2token.put(token.accessToken, token);
 		// the token we just put into `accessToken2token` may have been flush out from cache here,
 		// and the listener may be notified before the token is put into `lastAcquiredToken`
@@ -180,11 +190,17 @@ public class TokenStore {
 	}
 
 	public void revokeAll(YggdrasilUser user) {
+		/*
+		 * 从MySQL中找到对应的数据，然后全给扬了
+		 */
 		notBefore.computeIfAbsent(user, k -> new AtomicLong())
 				.getAndUpdate(original -> max(original, tokenIdGen.get()));
 	}
 
 	public int tokensCount() {
+		/*
+		 * 拿SQL语句硬数吧
+		 */
 		return accessToken2token.size();
 	}
 
