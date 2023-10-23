@@ -27,6 +27,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	implementation 'mysql:mysql-connector-java'
 	implementation 'com.google.code.gson:gson'
+	implementation 'de.mkammerer:argon2-jvm:2.11'
 
 	compileOnly 'org.projectlombok:lombok:1.18.26'
 

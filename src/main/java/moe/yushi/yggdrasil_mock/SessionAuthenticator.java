@@ -1,8 +1,8 @@
 package moe.yushi.yggdrasil_mock;
 
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
-import moe.yushi.yggdrasil_mock.memory.TokenStore.Token;
-import moe.yushi.yggdrasil_mock.user.YggdrasilCharacter;
+import moe.yushi.yggdrasil_mock.database.mysql.TokenStore.Token;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilCharacter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;

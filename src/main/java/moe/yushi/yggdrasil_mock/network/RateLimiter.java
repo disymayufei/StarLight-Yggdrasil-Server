@@ -1,6 +1,6 @@
 package moe.yushi.yggdrasil_mock.network;
 
-import moe.yushi.yggdrasil_mock.user.YggdrasilUser;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilUser;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 

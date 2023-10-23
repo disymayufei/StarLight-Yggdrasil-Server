@@ -2,8 +2,8 @@ package moe.yushi.yggdrasil_mock.database;
 
 import moe.yushi.yggdrasil_mock.texture.Texture;
 import moe.yushi.yggdrasil_mock.texture.TextureType;
-import moe.yushi.yggdrasil_mock.user.YggdrasilCharacter;
-import moe.yushi.yggdrasil_mock.user.YggdrasilUser;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilCharacter;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilUser;
 
 import java.util.List;
 import java.util.Optional;
@@ -15,7 +15,9 @@ public interface YggdrasilDatabase {
 
 	YggdrasilCharacter createNewCharacter(UUID uuid, String name, YggdrasilUser owner);
 
-	void uploadTexture(UUID uuid, Texture texture, TextureType type);
+	void setTexture(UUID uuid, Texture texture, TextureType type);
+
+	String getTexture(UUID uuid, TextureType textureType);
 
 	Optional<YggdrasilUser> findUserByEmail(String email);
 

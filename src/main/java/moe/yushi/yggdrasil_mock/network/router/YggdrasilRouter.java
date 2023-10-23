@@ -1,20 +1,20 @@
-package moe.yushi.yggdrasil_mock.network;
+package moe.yushi.yggdrasil_mock.network.router;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import moe.yushi.yggdrasil_mock.ServerMeta;
 import moe.yushi.yggdrasil_mock.SessionAuthenticator;
-import moe.yushi.yggdrasil_mock.database.YggdrasilDatabase;
 import moe.yushi.yggdrasil_mock.database.mysql.MysqlDatabase;
-import moe.yushi.yggdrasil_mock.memory.TokenStore;
-import moe.yushi.yggdrasil_mock.memory.TokenStore.AvailableLevel;
-import moe.yushi.yggdrasil_mock.memory.TokenStore.Token;
+import moe.yushi.yggdrasil_mock.database.mysql.TokenStore;
+import moe.yushi.yggdrasil_mock.database.mysql.TokenStore.AvailableLevel;
+import moe.yushi.yggdrasil_mock.database.mysql.TokenStore.Token;
+import moe.yushi.yggdrasil_mock.network.RateLimiter;
 import moe.yushi.yggdrasil_mock.texture.ModelType;
 import moe.yushi.yggdrasil_mock.texture.Texture;
 import moe.yushi.yggdrasil_mock.texture.TextureType;
-import moe.yushi.yggdrasil_mock.user.YggdrasilCharacter;
-import moe.yushi.yggdrasil_mock.user.YggdrasilUser;
-import moe.yushi.yggdrasil_mock.utils.MailUtils;
+import moe.yushi.yggdrasil_mock.utils.secure.EncryptUtils;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilCharacter;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,7 +45,6 @@ import java.util.stream.Stream;
 
 import static java.util.Map.entry;
 import static java.util.Map.ofEntries;
-import static java.util.Optional.of;
 import static java.util.concurrent.TimeUnit.DAYS;
 import static java.util.stream.Collectors.toList;
 import static moe.yushi.yggdrasil_mock.exception.YggdrasilException.*;
@@ -57,17 +56,14 @@ import static org.springframework.http.ResponseEntity.*;
 
 @Validated
 @RestController
-public class Router {
+public class YggdrasilRouter {
 
-	private final Logger logger = LoggerFactory.getLogger(Router.class);
+	private final Logger logger = LoggerFactory.getLogger(YggdrasilRouter.class);
 
 	private @Autowired ServerMeta meta;
 	private @Autowired RateLimiter rateLimiter;
-	private @Autowired YggdrasilDatabase database;
 	private @Autowired TokenStore tokenStore;
 	private @Autowired SessionAuthenticator sessionAuth;
-	private @Autowired Texture.Storage texturesStorage;
-	private @Autowired MailUtils mailUtils;
 	private @Autowired MysqlDatabase mysqlDatabase;
 	private @Value("${yggdrasil.core.login-with-character-name}") boolean loginWithCharacterName;
 
@@ -81,7 +77,7 @@ public class Router {
 	@GetMapping("/status")
 	public Map<?, ?> status() {
 		return ofEntries(
-				entry("user.count", database.getUsers().size()),
+				entry("user.count", mysqlDatabase.getUsers().size()),
 				entry("token.count", tokenStore.tokensCount()),
 				entry("pendingAuthentication.count", sessionAuth.pendingAuthenticationsCount()));
 	}
@@ -91,7 +87,7 @@ public class Router {
 		YggdrasilUser user;
 		YggdrasilCharacter character = null;
 		if (loginWithCharacterName) {
-			character = database.findCharacterByName(req.username).orElse(null);
+			character = mysqlDatabase.findCharacterByName(req.username).orElse(null);
 		}
 		if (character == null) {
 			user = passwordAuthenticated(req.username, req.password);
@@ -123,7 +119,7 @@ public class Router {
 	@PostMapping("/authserver/refresh")
 	public Map<?, ?> refresh(@RequestBody @Valid RefreshRequest req) {
 		var characterToSelect = req.selectedProfile == null ? null
-				: database.findCharacterByUUID(toUUID(req.selectedProfile.id))
+				: mysqlDatabase.findCharacterByUUID(toUUID(req.selectedProfile.id))
 						.orElseThrow(() -> newIllegalArgumentException(m_profile_not_found));
 
 		if (characterToSelect != null && !characterToSelect.getName().equals(req.selectedProfile.name))
@@ -181,7 +177,7 @@ public class Router {
 		var token = authenticate(req.accessToken, null, AvailableLevel.COMPLETE);
 		if (token.getBoundCharacter().isPresent() &&
 				unsign(token.getBoundCharacter().get().getUuid()).equals(req.selectedProfile)) {
-			var ip = of(http.getRemoteAddress())
+			var ip = Optional.ofNullable(http.getRemoteAddress())
 					.map(addr -> addr.getAddress().getHostAddress());
 			sessionAuth.joinServer(token, req.serverId, ip);
 		} else {
@@ -240,7 +236,7 @@ public class Router {
 	public Stream<Map<?, ?>> queryProfiles(@RequestBody List<String> names) {
 		return names.stream()
 				.distinct()
-				.map(database::findCharacterByName)
+				.map(mysqlDatabase::findCharacterByName)
 				.flatMap(Optional::stream)
 				.map(YggdrasilCharacter::toSimpleResponse);
 	}
@@ -248,14 +244,14 @@ public class Router {
 	@GetMapping("/sessionserver/session/minecraft/profile/{uuid:[a-f0-9]{32}}")
 	public ResponseEntity<?> profile(@PathVariable String uuid, @RequestParam(required = false) String unsigned) {
 		var signed = "false".equals(unsigned);
-		return database.findCharacterByUUID(toUUID(uuid))
+		return mysqlDatabase.findCharacterByUUID(toUUID(uuid))
 				.map(character -> ok(character.toCompleteResponse(signed)))
 				.orElse(noContent().build());
 	}
 
 	@GetMapping("/textures/{hash:[a-f0-9]{64}}")
 	public ResponseEntity<?> texture(@PathVariable String hash) {
-		return texturesStorage.getTexture(hash)
+		return mysqlDatabase.getTexturesStorage().getTexture(hash)
 				.map(texture -> ok()
 						.contentType(IMAGE_PNG)
 						.eTag(texture.hash)
@@ -264,25 +260,9 @@ public class Router {
 				.orElse(notFound().build());
 	}
 
-	@GetMapping("/test")
-	public ResponseEntity<?> test() {
-
-		System.err.println(mysqlDatabase.findUserByEmail("example@a.com"));
-
-		return noContent().build();
-	}
-
-	@GetMapping("/test/add")
-	public ResponseEntity<?> testAdd() {
-		mysqlDatabase.addUser("example@b.com", UUID.randomUUID().toString(), "pwd");
-
-		return noContent().build();
-	}
-
 	@DeleteMapping("/api/user/profile/{uuid}/{textureType}")
 	public ResponseEntity<?> deleteTexture(@PathVariable String uuid, @PathVariable TextureType textureType, @RequestHeader(required = false) String authorization) {
 		var character = authTextureOperation(uuid, textureType, authorization);
-		character.getTextures().remove(textureType);
 		return noContent().build();
 	}
 
@@ -293,12 +273,11 @@ public class Router {
 		var character = authTextureOperation(uuid, textureType, authorization);
 		Texture texture;
 		try (var in = new ByteArrayInputStream(imageFile)) {
-			texture = texturesStorage.loadTexture(in);
+			texture = mysqlDatabase.getTexturesStorage().loadTexture(in);
 		} catch (IOException e) {
 			logger.warn("unable to parse uploaded texture", e);
 			throw newIllegalArgumentException("bad image");
 		}
-		character.getTextures().put(textureType, texture);
 		if (textureType == TextureType.SKIN) {
 			if ("slim".equals(textureModel)) {
 				character.setModel(ModelType.ALEX);
@@ -306,33 +285,10 @@ public class Router {
 				character.setModel(ModelType.STEVE);
 			}
 		}
+
+		mysqlDatabase.getTexturesStorage().uploadTexture(texture);
+		mysqlDatabase.setTexture(toUUID(uuid), texture, textureType);
 		return noContent().build();
-	}
-
-	@GetMapping("/sendVerifyCode/{email}")
-	public ResponseEntity<?> sendEmail(@PathVariable String email) {
-		Map<String, String> response;
-
-		if (!rateLimiter.tryAccess(email)) {
-			response = new HashMap<>(){{
-				put("status", "failed");
-				put("errorMessage", "Exceed speed limit.");
-				put("receiver", email);
-			}};
-
-			return new ResponseEntity<>(response, HttpStatus.FORBIDDEN);
-		}
-
-		mailUtils.sendVerifyCodeMail(email);
-
-		System.out.println(mailUtils.getVerifyCode(email));
-
-		response = new HashMap<>(){{
-			put("status", "success");
-			put("receiver", email);
-		}};
-
-		return new ResponseEntity<>(response, HttpStatus.OK);
 	}
 
 	@ExceptionHandler(ValidationException.class)
@@ -342,14 +298,15 @@ public class Router {
 
 	// ---- Helper methods ----
 	private YggdrasilUser passwordAuthenticated(String username, String password) {
-		var user = database.findUserByEmail(username)
+		var user = mysqlDatabase.findUserByEmail(username)
 				.orElseThrow(() -> newForbiddenOperationException(m_invalid_credentials));
 
 		if (!rateLimiter.tryAccess(user))
 			throw newForbiddenOperationException(m_invalid_credentials);
 
-		if (!password.equals(user.getPassword()))
+		if (!EncryptUtils.verifyArgon2Hash(user.getPassword(), password)) {
 			throw newForbiddenOperationException(m_invalid_credentials);
+		}
 
 		return user;
 	}
@@ -380,7 +337,7 @@ public class Router {
 
 	private YggdrasilCharacter authTextureOperation(String uuid, TextureType textureType, String authorization) {
 		var token = processAuthorizationHeader(authorization);
-		var character = database.findCharacterByUUID(toUUID(uuid))
+		var character = mysqlDatabase.findCharacterByUUID(toUUID(uuid))
 				.orElseThrow(() -> newIllegalArgumentException(m_profile_not_found));
 		if (character.getOwner() != token.getUser())
 			throw newForbiddenOperationException(m_access_denied);

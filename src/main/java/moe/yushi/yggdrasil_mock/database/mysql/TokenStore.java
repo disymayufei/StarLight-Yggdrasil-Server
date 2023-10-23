@@ -1,35 +1,45 @@
-package moe.yushi.yggdrasil_mock.memory;
+package moe.yushi.yggdrasil_mock.database.mysql;
 
-import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
-import moe.yushi.yggdrasil_mock.user.YggdrasilCharacter;
-import moe.yushi.yggdrasil_mock.user.YggdrasilUser;
+import moe.yushi.yggdrasil_mock.database.mysql.MysqlDatabase;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilCharacter;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilUser;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.PostConstruct;
+import java.math.BigInteger;
 import java.time.Duration;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.UUID;
 import java.util.function.Predicate;
 
-import static java.lang.Math.max;
 import static java.util.Optional.empty;
 import static java.util.Optional.of;
 import static moe.yushi.yggdrasil_mock.utils.UUIDUtils.randomUnsignedUUID;
 
+@SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 @Component
 @ConfigurationProperties(prefix = "yggdrasil.token")
 public class TokenStore {
+	private JdbcTemplate jdbcTemplate;
 
-	private static final int MAX_TOKEN_COUNT = 100_000;
+	@Autowired
+	private MysqlDatabase mysqlDatabase;
+
+	@PostConstruct
+	private void init() {
+		this.jdbcTemplate = mysqlDatabase.getJdbcTemplate();
+	}
 
 	public enum AvailableLevel {
 		COMPLETE, PARTIAL;
 	}
 
 	public class Token {
-		private long id;
 		private String clientToken;
 		private String accessToken;
 		private long createdAt;
@@ -43,16 +53,11 @@ public class TokenStore {
 			if (enableTimeToPartiallyExpired && System.currentTimeMillis() > createdAt + timeToPartiallyExpired.toMillis())
 				return false;
 
-			return !onlyLastSessionAvailable || this == lastAcquiredToken.get(user);
+			return !onlyLastSessionAvailable;
 		}
 
 		private boolean isFullyExpired() {
-			if (System.currentTimeMillis() > createdAt + timeToFullyExpired.toMillis())
-				return true;
-
-			AtomicLong latestRevoked = notBefore.get(user);
-
-			return latestRevoked != null && id < latestRevoked.get();
+			return System.currentTimeMillis() > createdAt + timeToFullyExpired.toMillis();
 		}
 
 		public String getClientToken() {
@@ -83,30 +88,41 @@ public class TokenStore {
 
 	private boolean onlyLastSessionAvailable;
 
-	private final AtomicLong tokenIdGen = new AtomicLong();
-	private final ConcurrentHashMap<YggdrasilUser, AtomicLong> notBefore = new ConcurrentHashMap<>();
-	private final ConcurrentHashMap<YggdrasilUser, Token> lastAcquiredToken = new ConcurrentHashMap<>();  // 储存某用户上次请求得到的的Token
-	private final ConcurrentLinkedHashMap<String, Token> accessToken2token = new ConcurrentLinkedHashMap.Builder<String, Token>()  // 将字符串形式的accessToken转化为Token对象
-			.maximumWeightedCapacity(MAX_TOKEN_COUNT)
-			.listener((k, v) -> lastAcquiredToken.remove(v.user, v))
-			.build();
-
 	private void removeToken(Token token) {
-		/*
-		 * 逻辑：从数据库中寻找相应的Token
-		 * 如果存在该Token，给删了
-		 */
-		accessToken2token.remove(token.accessToken);
-		lastAcquiredToken.remove(token.user, token);
+		String sql = "DELETE FROM Token WHERE access_token=?";
+		jdbcTemplate.update(sql, token.accessToken);
 	}
 
 	public Optional<Token> authenticate(String accessToken, @Nullable String clientToken, AvailableLevel availableLevel) {
-		/*
-		 * 第一步替换成，从SQL数据库中拿数据
-		 */
-		var token = accessToken2token.getQuietly(accessToken);
-		if (token == null)
+		String sql = "SELECT * FROM Token WHERE access_token=?";
+		Token token;
+
+		try {
+			var resultList = jdbcTemplate.queryForList(sql, accessToken);
+			if (!resultList.isEmpty()) {
+				var result = resultList.get(0);
+
+				token = new Token();
+				token.accessToken = (String) result.get("access_token");
+				token.clientToken = (String) result.get("client_token");
+				token.createdAt = ((BigInteger) result.get("created_at")).longValue();
+
+				Optional<YggdrasilUser> user = mysqlDatabase.findUserByUID(((BigInteger) result.get("user_uid")).longValue());
+				if (user.isEmpty()) {
+					return empty();
+				}
+
+				token.user = user.get();
+				token.boundCharacter = mysqlDatabase.findCharacterByUUID(UUID.fromString((String) result.get("character")));
+			}
+			else {
+				return empty();
+			}
+
+		}
+		catch (EmptyResultDataAccessException e) {
 			return empty();
+		}
 
 		if (token.isFullyExpired()) {
 			removeToken(token);
@@ -143,14 +159,8 @@ public class TokenStore {
 						// the operation cannot be performed
 						return empty();
 
-					if (accessToken2token.remove(accessToken) == token) {
-						// we have won the remove() race
-						lastAcquiredToken.remove(token.user, token);
-						return of(token);
-					} else {
-						// another thread won the race and consumed the token
-						return empty();
-					}
+					removeToken(token);
+					return of(token);
 				});
 	}
 
@@ -172,36 +182,24 @@ public class TokenStore {
 		token.clientToken = clientToken == null ? randomUnsignedUUID() : clientToken;
 		token.createdAt = System.currentTimeMillis();
 		token.user = user;
-		token.id = tokenIdGen.getAndIncrement();
 
-		/*
-		 * 这里换成往MySQL中塞数据
-		 */
-		accessToken2token.put(token.accessToken, token);
-		// the token we just put into `accessToken2token` may have been flush out from cache here,
-		// and the listener may be notified before the token is put into `lastAcquiredToken`
-		lastAcquiredToken.put(user, token);
+		String sql = "INSERT INTO Token(`client_token`, `access_token`, `created_at`, `character`, `user_uid`) VALUES(?, ?, ?, ?, ?)";
 
-		if (!accessToken2token.containsKey(token.accessToken))
-			// if so, remove the token from `lastAcquiredToken`
-			lastAcquiredToken.remove(user, token);
+		String uuid = token.boundCharacter.map(yggdrasilCharacter -> yggdrasilCharacter.getUuid().toString()).orElse(null);
+		jdbcTemplate.update(sql, token.clientToken, token.accessToken, token.createdAt, uuid, token.user.getUID());
 
 		return token;
 	}
 
 	public void revokeAll(YggdrasilUser user) {
-		/*
-		 * 从MySQL中找到对应的数据，然后全给扬了
-		 */
-		notBefore.computeIfAbsent(user, k -> new AtomicLong())
-				.getAndUpdate(original -> max(original, tokenIdGen.get()));
+		String sql = "DELETE FROM Token WHERE user_uid=?";
+		jdbcTemplate.update(sql, user.getUID());
 	}
 
 	public int tokensCount() {
-		/*
-		 * 拿SQL语句硬数吧
-		 */
-		return accessToken2token.size();
+		String sql = "SELECT COUNT(*) as count FROM Token";
+		Integer num = jdbcTemplate.queryForObject(sql, Integer.class);
+		return num == null ? 0 : num;
 	}
 
 	public Duration getTimeToPartiallyExpired() {

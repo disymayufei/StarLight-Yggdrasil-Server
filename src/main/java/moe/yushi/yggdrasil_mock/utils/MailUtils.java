@@ -3,7 +3,8 @@ package moe.yushi.yggdrasil_mock.utils;
 import lombok.Data;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
-import moe.yushi.yggdrasil_mock.database.RedisService;
+import moe.yushi.yggdrasil_mock.database.redis.RedisService;
+import moe.yushi.yggdrasil_mock.utils.secure.EncryptUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
@@ -66,12 +67,12 @@ public class MailUtils {
     }
 
     public void sendVerifyCodeMail(String receiver) {
-        String message = "请确认您刚刚在TLSL皮肤站申请过验证码，若非是您本人的行为，请忽略!";
+        String message = "请确认您刚刚在TLSL玩家中心申请过验证码，若非是您本人的行为，请忽略!";
 
-        String code = KeyUtils.gen(6);
+        String code = EncryptUtils.gen(6);
 
-        redisService.put(receiver, code);
-        redisService.expireKey(receiver, 5, TimeUnit.MINUTES);
+        redisService.put("email-" + receiver, code);
+        redisService.expireKey("email-" + receiver, 5, TimeUnit.MINUTES);
 
         Context context = new Context();
         context.setVariable("message", message);
@@ -83,7 +84,7 @@ public class MailUtils {
     }
 
     public String getVerifyCode(String email) {
-        return redisService.get(email);
+        return redisService.get("email-" + email);
     }
 
     @RequiredArgsConstructor

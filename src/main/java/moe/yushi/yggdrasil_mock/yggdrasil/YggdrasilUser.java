@@ -1,4 +1,4 @@
-package moe.yushi.yggdrasil_mock.user;
+package moe.yushi.yggdrasil_mock.yggdrasil;
 
 import lombok.AllArgsConstructor;
 import lombok.NonNull;
@@ -44,8 +44,12 @@ public class YggdrasilUser {
         return id.toString();
     }
 
-    public void addCharacters(YggdrasilCharacter character) {
+    public void addCharacter(YggdrasilCharacter character) {
         this.characters.add(character);
+    }
+
+    public void addCharacters(List<YggdrasilCharacter> characters) {
+        this.characters.addAll(characters);
     }
 
     public List<YggdrasilCharacter> getCharacters() {

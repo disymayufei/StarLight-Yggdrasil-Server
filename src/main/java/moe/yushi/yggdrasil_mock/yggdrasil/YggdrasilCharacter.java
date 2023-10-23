@@ -1,15 +1,14 @@
-package moe.yushi.yggdrasil_mock.user;
+package moe.yushi.yggdrasil_mock.yggdrasil;
 
 import lombok.NonNull;
+import moe.yushi.yggdrasil_mock.database.mysql.MysqlDatabase;
 import moe.yushi.yggdrasil_mock.texture.ModelType;
 import moe.yushi.yggdrasil_mock.texture.Texture;
 import moe.yushi.yggdrasil_mock.texture.TextureType;
+import org.springframework.beans.factory.annotation.Autowired;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentSkipListMap;
 
 import static java.util.Collections.singletonMap;
 import static java.util.Map.entry;
@@ -25,7 +24,6 @@ public class YggdrasilCharacter {
     @NonNull
     private String name;
     private ModelType model = ModelType.STEVE;
-    private final Map<TextureType, Texture> textures = new ConcurrentSkipListMap<>();
     private final Set<TextureType> uploadableTextures = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private YggdrasilUser owner;
 
@@ -35,34 +33,6 @@ public class YggdrasilCharacter {
         this.owner = owner;
 
         this.uploadableTextures.addAll(Arrays.asList(uploadableTextures));
-    }
-
-    public void saveTextureToDisk() {
-        File rootDir = new File("Texture/" + uuid);
-        if (!rootDir.isDirectory()) {
-            rootDir.mkdirs();
-        }
-
-        for (Map.Entry<TextureType, Texture> entry : textures.entrySet()) {
-            File textureFile = new File(rootDir, entry.getKey().toString() + ".png");
-            if (!textureFile.isFile()) {
-                try {
-                    textureFile.createNewFile();
-
-                    try(FileOutputStream outputStream = new FileOutputStream(textureFile)) {
-                        outputStream.write(entry.getValue().getData());
-                    }
-                    catch (Exception e) {
-                        System.err.println("Failed to save the texture file to disk.");
-                        e.printStackTrace();
-                    }
-
-                } catch (Exception e) {
-                    System.err.println("Failed to save the texture file to disk.");
-                    e.printStackTrace();
-                }
-            }
-        }
     }
 
     public @NonNull UUID getUuid() {
@@ -87,10 +57,6 @@ public class YggdrasilCharacter {
 
     public void setModel(ModelType model) {
         this.model = model;
-    }
-
-    public Map<TextureType, Texture> getTextures() {
-        return textures;
     }
 
     public YggdrasilUser getOwner() {
@@ -118,6 +84,14 @@ public class YggdrasilCharacter {
     @SuppressWarnings("unchecked")
     public Map<String, Object> toCompleteResponse(boolean signed) {
         var texturesResponse = new LinkedHashMap<>();
+        var textures = new HashMap<TextureType, Texture>();
+
+        for (TextureType type : uploadableTextures) {
+            MysqlDatabase mysqlDatabase = MysqlDatabase.INSTANCE;
+            String hash = mysqlDatabase.getTexture(uuid, type);
+            mysqlDatabase.getTexturesStorage().getTexture(hash).ifPresent((texture) -> textures.put(type, texture));
+        }
+
         textures.forEach((type, texture) -> {
             // @formatter:off
             texturesResponse.put(type, type.getMetadata(this)

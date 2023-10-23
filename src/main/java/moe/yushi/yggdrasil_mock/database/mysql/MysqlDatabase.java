@@ -1,26 +1,24 @@
 package moe.yushi.yggdrasil_mock.database.mysql;
 
-import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import lombok.NonNull;
 import moe.yushi.yggdrasil_mock.database.YggdrasilDatabase;
-import moe.yushi.yggdrasil_mock.exception.FileUploadFailedException;
 import moe.yushi.yggdrasil_mock.exception.UserAlreadyExistedException;
 import moe.yushi.yggdrasil_mock.texture.ModelType;
 import moe.yushi.yggdrasil_mock.texture.Texture;
 import moe.yushi.yggdrasil_mock.texture.TextureType;
-import moe.yushi.yggdrasil_mock.user.YggdrasilCharacter;
-import moe.yushi.yggdrasil_mock.user.YggdrasilUser;
+import moe.yushi.yggdrasil_mock.utils.secure.EncryptUtils;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilCharacter;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilUser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.Nullable;
 import javax.annotation.PostConstruct;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.math.BigInteger;
 import java.util.*;
 
@@ -44,24 +42,17 @@ public class MysqlDatabase implements YggdrasilDatabase {
     @Value("${database.mysql.database-name}")
     private String databaseName;
 
-    @Autowired
-    private Texture.Storage textureStorage;
+    private @Autowired TextureStorage texturesStorage;
 
     private final HikariConfig config = new HikariConfig();
 
-    // 以Email为key，User为value
-    private final ConcurrentLinkedHashMap<String, YggdrasilUser> userCache =
-            new ConcurrentLinkedHashMap.Builder<String, YggdrasilUser>()
-                    .maximumWeightedCapacity(64)
-                    .build();
-
-    // 以UUID为key，Character为value
-    private final ConcurrentLinkedHashMap<UUID, YggdrasilCharacter> characterCache =
-            new ConcurrentLinkedHashMap.Builder<UUID, YggdrasilCharacter>()
-            .maximumWeightedCapacity(64)
-            .build();
-
     private JdbcTemplate jdbcTemplate = null;
+
+    protected JdbcTemplate getJdbcTemplate() {
+        return this.jdbcTemplate;
+    }
+
+    public static MysqlDatabase INSTANCE = null;
 
     @PostConstruct
     public void init() {
@@ -75,15 +66,18 @@ public class MysqlDatabase implements YggdrasilDatabase {
         config.setPassword(password);
         config.addDataSourceProperty("autoCommit", "true");
         config.addDataSourceProperty("connectionTimeout", "5");
-        config.addDataSourceProperty("idleTimeout", "60");
+        config.addDataSourceProperty("idleTimeout", "60000");
+        config.addDataSourceProperty("maxLifeTime", "6000");
 
         connect();
+
+        INSTANCE = this;
     }
 
     public void connect() {
         if (jdbcTemplate == null) {
             try {
-                this.jdbcTemplate = new JdbcTemplate(new HikariDataSource(config));
+                jdbcTemplate = new JdbcTemplate(new HikariDataSource(config));
             }
             catch (Exception e) {
                 throw new RuntimeException("MySQL database connect failed!", e);
@@ -92,15 +86,17 @@ public class MysqlDatabase implements YggdrasilDatabase {
 
         createUserTable();
         createCharacterTable();
+        createTokenTable();
     }
 
     private void createUserTable() {
-        String sql = "CREATE TABLE IF NOT EXISTS `User` (" +
+        String sql = "CREATE TABLE IF NOT EXISTS `YggdrasilUser` (" +
                 "`uid` BIGINT UNSIGNED AUTO_INCREMENT," +
                 "`email` VARCHAR(50) NOT NULL," +
                 "`uuid` VARCHAR(36) NOT NULL," +
-                "`password` VARCHAR(100) NOT NULL," +
+                "`password` TEXT NOT NULL," +
                 "`qq` BIGINT UNSIGNED," +
+                "`permission` INT DEFAULT 0," +
                 "INDEX `idx` (`qq`, `email`)," +
                 "PRIMARY KEY (`uid`)" +
                 ")";
@@ -108,16 +104,28 @@ public class MysqlDatabase implements YggdrasilDatabase {
     }
 
     private void createCharacterTable() {
-        String sql = "CREATE TABLE IF NOT EXISTS `Character` (" +
+        String sql = "CREATE TABLE IF NOT EXISTS `YggdrasilCharacter` (" +
                 "`uuid` VARCHAR(36) NOT NULL," +
                 "`name` VARCHAR(16) NOT NULL," +
                 "`skin` TEXT," +
                 "`cape` TEXT," +
                 "`elytra` TEXT," +
                 "`model` VARCHAR(10) NOT NULL," +
-                "`owner_uid BIGINT UNSIGNED`," +
-                "`slot` INT," +
+                "`owner_uid` BIGINT UNSIGNED," +
+                "`slot` INTEGER," +
                 "PRIMARY KEY (`uuid`)" +
+                ")";
+        jdbcTemplate.update(sql);
+    }
+
+    private void createTokenTable() {
+        String sql = "CREATE TABLE IF NOT EXISTS `Token` (" +
+                "`client_token` TEXT," +
+                "`access_token` TEXT NOT NULL," +
+                "`created_at` BIGINT UNSIGNED," +
+                "`character` VARCHAR(36)," +
+                "`user_uid` BIGINT UNSIGNED," +
+                "PRIMARY KEY (`access_token`(100))" +
                 ")";
         jdbcTemplate.update(sql);
     }
@@ -129,14 +137,14 @@ public class MysqlDatabase implements YggdrasilDatabase {
     }
 
     public int getCharacterNum(long uid) {
-        String sql = "SELECT COUNT(*) as count WHERE uid=?";
+        String sql = "SELECT COUNT(*) as count FROM YggdrasilCharacter WHERE `owner_uid`=?";
         Integer num = jdbcTemplate.queryForObject(sql, Integer.class, uid);
         return num == null ? 0 : num;
     }
 
     public boolean addUser(String email, String uuid, String password) {
         if (findUserByEmail(email).isEmpty()) {
-            String sql = "INSERT INTO User(email, uuid, password) VALUES(?, ?, ?)";
+            String sql = "INSERT INTO YggdrasilUser(email, uuid, password) VALUES(?, ?, ?)";
 
             int status = jdbcTemplate.update(sql, email, uuid, password);
             return status > 0;
@@ -147,7 +155,7 @@ public class MysqlDatabase implements YggdrasilDatabase {
     }
 
     public boolean bindQQ(String email, long qq) {
-        String sql = "UPDATE User SET qq=? WHERE email=?";
+        String sql = "UPDATE YggdrasilUser SET qq=? WHERE `email`=?";
         Integer tableNum = jdbcTemplate.queryForObject(sql, Integer.class, qq, email);
         return tableNum != null && tableNum > 0;
     }
@@ -163,7 +171,7 @@ public class MysqlDatabase implements YggdrasilDatabase {
 
         int slot = findFirstEmptySlot(ownerUid);
 
-        String sql = "INSERT INTO Character(uuid, name, model, owner_uid, slot) VALUES(?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO YggdrasilCharacter(uuid, name, model, owner_uid, slot) VALUES(?, ?, ?, ?, ?)";
         int status = jdbcTemplate.update(sql, uuid, name, modelType.getModelName(), ownerUid, slot);
         return status > 0;
     }
@@ -174,7 +182,7 @@ public class MysqlDatabase implements YggdrasilDatabase {
      * @return 第一个空槽位
      */
     public int findFirstEmptySlot(long uid) {
-        String sql = "SELECT * FROM Character WHERE (uid=? AND slot=?)";
+        String sql = "SELECT * FROM YggdrasilCharacter WHERE (`owner_uid`=? AND `slot`=?)";
         int slot = 1;
 
         while (true) {
@@ -199,57 +207,65 @@ public class MysqlDatabase implements YggdrasilDatabase {
     }
 
     @Override
-    public void uploadTexture(UUID uuid, Texture texture, TextureType type) {
+    public void setTexture(@NonNull UUID uuid, @Nullable Texture texture, @NonNull TextureType type) {
         if (findCharacterByUUID(uuid).isEmpty()) {
             throw newForbiddenOperationException(m_profile_not_found);
         }
 
-        File rootDir = new File("Texture");
-        if (!rootDir.isDirectory()) {
-            rootDir.mkdirs();
+        String sql = "UPDATE YggdrasilCharacter SET ?=? WHERE `uuid`=?";
+        if (texture == null) {
+            jdbcTemplate.update(sql, type.toString(), null, uuid);
+        }
+        else {
+            jdbcTemplate.update(sql, type.toString(), texture.getHash(), uuid);
+        }
+    }
+
+    @Override
+    public String getTexture(@NonNull UUID uuid, @NonNull TextureType type) {
+        if (findCharacterByUUID(uuid).isEmpty()) {
+            throw newForbiddenOperationException(m_profile_not_found);
         }
 
-        File textureFile = new File(rootDir, texture.getHash() + ".png");
-        if (!textureFile.isFile()) {
-            try {
-                textureFile.createNewFile();
-            }
-            catch (Exception e) {
-                System.err.println("Failed to create the texture file!");
-                e.printStackTrace();
-                throw new FileUploadFailedException("Failed to create the texture file!");
-            }
+        String sql = "SELECT ? FROM YggdrasilCharacter WHERE `uuid`=? ";
 
-            try (FileOutputStream outputStream = new FileOutputStream(textureFile)) {
-                outputStream.write(texture.getData());
-            }
-            catch (Exception e) {
-                System.err.println("Failed to save the texture file to disk.");
-                e.printStackTrace();
-                throw new FileUploadFailedException("The texture file can not be written!");
-            }
+        return jdbcTemplate.queryForObject(sql, String.class, type.toString(), uuid);
+    }
+
+    public boolean verifyUserPassword(@NonNull String email, @NonNull String password) {
+        Optional<YggdrasilUser> yggdrasilUserOptional = findUserByEmail(email);
+        if (yggdrasilUserOptional.isEmpty()) {
+            return false;
         }
 
-        String sql = "UPDATE Character SET ?=? WHERE uuid=?";
-        jdbcTemplate.update(sql, type, textureFile.getPath(), uuid);
+        String hash = yggdrasilUserOptional.get().getPassword();
+        return EncryptUtils.verifyArgon2Hash(hash, password);
+    }
 
+    public int getUserPermission(@NonNull String email) {
+        if (findUserByEmail(email).isEmpty()) {
+            throw newForbiddenOperationException(m_profile_not_found);
+        }
+
+        String sql = "SELECT `permission` FROM YggdrasilUser WHERE `email`=?";
+        Integer result = jdbcTemplate.queryForObject(sql, Integer.class, email);
+
+        return result == null ? 0 : result;
     }
 
     public Optional<YggdrasilUser> findUserByUID(long uid) {
-        for (var entry : userCache.entrySet()) {
-            if (entry.getValue().getUID() == uid) {
-                return Optional.of(userCache.get(entry.getKey()));  // 将该User的缓存状态刷新为活跃
-            }
-        }
-
-        String sql = "SELECT * FROM User WHERE uid=?";
+        String sql = "SELECT * FROM YggdrasilUser WHERE `uid`=?";
 
         try {
             var resultList = jdbcTemplate.queryForList(sql, uid);
             if (!resultList.isEmpty()) {
                 var result = resultList.get(0);
-                YggdrasilUser user = new YggdrasilUser(UUID.fromString((String)result.get("uuid")), (String) result.get("email"), (String) result.get("password"), ((BigInteger) result.get("uid")).longValue());
-                userCache.put((String) result.get("email"), user);
+                YggdrasilUser user = new YggdrasilUser(
+                                UUID.fromString((String)result.get("uuid")),
+                                (String) result.get("email"),
+                                (String) result.get("password"),
+                                ((BigInteger) result.get("uid")).longValue()
+                        );
                 return Optional.of(user);
             }
 
@@ -263,19 +279,21 @@ public class MysqlDatabase implements YggdrasilDatabase {
 
     @Override
     public Optional<YggdrasilUser> findUserByEmail(String email) {
-        YggdrasilUser user = userCache.get(email);
-        if (user != null) {
-            return Optional.of(user);
-        }
-
-        String sql = "SELECT * FROM User WHERE email=?";
+        String sql = "SELECT * FROM YggdrasilUser WHERE `email`=?";
         try {
             var resultList = jdbcTemplate.queryForList(sql, email);
             if (!resultList.isEmpty()) {
                 var result = resultList.get(0);
-                var character = new YggdrasilUser(UUID.fromString((String)result.get("uuid")), email, (String) result.get("password"), ((BigInteger) result.get("uid")).longValue());
-                userCache.put(email, character);
-                return Optional.of(character);
+                var userResult = new YggdrasilUser(
+                                UUID.fromString((String)result.get("uuid")),
+                                email,
+                                (String) result.get("password"),
+                                ((BigInteger) result.get("uid")).longValue()
+                );
+
+                userResult.addCharacters(findCharactersByUID(userResult.getUID()));
+
+                return Optional.of(userResult);
             }
 
         }
@@ -288,24 +306,13 @@ public class MysqlDatabase implements YggdrasilDatabase {
 
     @Override
     public Optional<YggdrasilCharacter> findCharacterByUUID(UUID uuid) {
-        YggdrasilCharacter character = characterCache.get(uuid);
-        if (character != null) {
-            return Optional.of(character);
-        }
-
-        String sql = "SELECT * FROM Character WHERE uuid=?";
+        String sql = "SELECT * FROM YggdrasilCharacter WHERE `uuid`=?";
         return getYggdrasilCharacter(sql, uuid);
     }
 
     @Override
     public Optional<YggdrasilCharacter> findCharacterByName(String name) {
-        for (var entry : characterCache.entrySet()) {
-            if (name.equals(entry.getValue().getName())) {
-                return Optional.of(characterCache.get(entry.getKey()));  // 刷新Character在内存中的状态为活跃
-            }
-        }
-
-        String sql = "SELECT * FROM Character WHERE name=?";
+        String sql = "SELECT * FROM YggdrasilCharacter WHERE `name`=?";
 
         return getYggdrasilCharacter(sql, name);
     }
@@ -319,9 +326,31 @@ public class MysqlDatabase implements YggdrasilDatabase {
             return characterList;
         }
 
-        String sql = "SELECT * FROM Character WHERE uid=?";
+        String sql = "SELECT * FROM YggdrasilCharacter WHERE `owner_uid`=?";
         try {
-            var resultList = jdbcTemplate.queryForList(sql, email);
+            var resultList = jdbcTemplate.queryForList(sql, user.get().getUID());
+            for (var result : resultList) {
+                characterList.add(new YggdrasilCharacter(UUID.fromString((String)result.get("uuid")), (String)result.get("name"), user.get()));
+            }
+        }
+        catch (EmptyResultDataAccessException e) {
+            return characterList;
+        }
+
+        return characterList;
+    }
+
+    public List<YggdrasilCharacter> findCharactersByUID(long uid) {
+        List<YggdrasilCharacter> characterList = new ArrayList<>();
+
+        Optional<YggdrasilUser> user = findUserByUID(uid);
+        if (user.isEmpty()) {
+            return characterList;
+        }
+
+        String sql = "SELECT * FROM YggdrasilCharacter WHERE `owner_uid`=?";
+        try {
+            var resultList = jdbcTemplate.queryForList(sql, uid);
             for (var result : resultList) {
                 characterList.add(new YggdrasilCharacter(UUID.fromString((String)result.get("uuid")), (String)result.get("name"), user.get()));
             }
@@ -337,11 +366,16 @@ public class MysqlDatabase implements YggdrasilDatabase {
     public List<YggdrasilUser> getUsers() {
         List<YggdrasilUser> userList = new ArrayList<>();
 
-        String sql = "SELECT * FROM User";
+        String sql = "SELECT * FROM YggdrasilUser";
         try {
             var resultList = jdbcTemplate.queryForList(sql);
             for (Map<String, Object> result : resultList) {
-                userList.add(new YggdrasilUser(UUID.fromString((String)result.get("uuid")), (String) result.get("email"), (String) result.get("password"), ((BigInteger) result.get("uid")).longValue()));
+                userList.add(new YggdrasilUser(
+                        UUID.fromString((String)result.get("uuid")),
+                        (String) result.get("email"),
+                        (String) result.get("password"),
+                        ((BigInteger) result.get("uid")).longValue()
+                ));
             }
 
         }
@@ -362,7 +396,6 @@ public class MysqlDatabase implements YggdrasilDatabase {
                 }
 
                 YggdrasilCharacter character = new YggdrasilCharacter(UUID.fromString((String)result.get("uuid")), (String)result.get("name"), owner.get());
-                characterCache.put(character.getUuid(), character);
                 return Optional.of(character);
             }
 
@@ -372,5 +405,9 @@ public class MysqlDatabase implements YggdrasilDatabase {
         }
 
         return Optional.empty();
+    }
+
+    public TextureStorage getTexturesStorage() {
+        return texturesStorage;
     }
 }

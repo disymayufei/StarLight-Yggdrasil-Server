@@ -1,5 +1,6 @@
 package moe.yushi.yggdrasil_mock.texture;
 
+import moe.yushi.yggdrasil_mock.database.mysql.TextureStorage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationPropertiesBinding;
 import org.springframework.core.convert.converter.Converter;
@@ -12,7 +13,7 @@ import java.io.UncheckedIOException;
 @ConfigurationPropertiesBinding
 public class TextureURLConverter implements Converter<String, Texture> {
 
-	private @Autowired Texture.Storage storage;
+	private @Autowired TextureStorage storage;
 
 	@Override
 	public Texture convert(String source) {

@@ -2,6 +2,7 @@ package moe.yushi.yggdrasil_mock.utils;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import moe.yushi.yggdrasil_mock.utils.secure.EncryptUtils;
 
 import java.security.*;
 import java.util.Base64;
@@ -21,7 +22,7 @@ public final class PropertiesUtils {
 	private static ObjectMapper objectMapper;
 
 	static {
-		keyPair = KeyUtils.generateKey();
+		keyPair = EncryptUtils.generateKey();
 		objectMapper = new ObjectMapper();
 	}
 

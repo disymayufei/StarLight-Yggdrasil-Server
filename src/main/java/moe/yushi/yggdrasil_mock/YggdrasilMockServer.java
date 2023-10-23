@@ -1,6 +1,6 @@
 package moe.yushi.yggdrasil_mock;
 
-import moe.yushi.yggdrasil_mock.utils.KeyUtils;
+import moe.yushi.yggdrasil_mock.utils.secure.EncryptUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
@@ -30,7 +30,7 @@ public class YggdrasilMockServer {
 
 	@Bean
 	public String publickeyPem() {
-		return KeyUtils.toPEMPublicKey(getSignaturePublicKey());
+		return EncryptUtils.toPEMPublicKey(getSignaturePublicKey());
 	}
 
 	@Bean

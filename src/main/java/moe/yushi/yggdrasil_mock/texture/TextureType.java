@@ -1,6 +1,6 @@
 package moe.yushi.yggdrasil_mock.texture;
 
-import moe.yushi.yggdrasil_mock.user.YggdrasilCharacter;
+import moe.yushi.yggdrasil_mock.yggdrasil.YggdrasilCharacter;
 
 import java.util.Map;
 import java.util.Optional;
