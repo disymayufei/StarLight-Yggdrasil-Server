@@ -22,21 +22,8 @@ database:
     port: 3306
     driver-class-name: com.mysql.cj.jdbc.Driver
     username: root
-    password: root
+    password: pwd
     database-name: sls_skin
-
-redis:
-  database: 0
-  host: 127.0.0.1
-  port: 6379
-  password: fs9158
-  jedis:
-    pool:
-      max-active: 20
-      max-wait: 100
-      max-idle: 20
-      min-idle: 5
-  timeout: 10000
 
 server:
   port: 8080
@@ -73,7 +60,7 @@ yggdrasil:
     time-to-partially-expired: 10m
     only-last-session-available: false
   core:
-    server-name: yggdrasil-mock-server
+    server-name: StarLight-Skin
     url: http://localhost:8080/
     skin-domains:
     - localhost

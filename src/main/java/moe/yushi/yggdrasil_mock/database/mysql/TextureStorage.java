@@ -23,7 +23,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 @Component
-public class TextureStorage {
+public final class TextureStorage {
     private JdbcTemplate jdbcTemplate;
 
     @Autowired

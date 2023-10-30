@@ -3,7 +3,7 @@ package moe.yushi.yggdrasil_mock.utils;
 import lombok.Data;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
-import moe.yushi.yggdrasil_mock.database.redis.RedisService;
+import moe.yushi.yggdrasil_mock.database.memory.StringCache;
 import moe.yushi.yggdrasil_mock.utils.secure.EncryptUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,12 +19,9 @@ import java.util.Calendar;
 import java.util.concurrent.TimeUnit;
 
 @Service
-public class MailUtils {
+public final class MailUtils {
     @Autowired
     private JavaMailSender mailSender;
-
-    @Autowired
-    private RedisService redisService;
 
     @Autowired
     private TemplateEngine templateEngine;
@@ -71,8 +68,8 @@ public class MailUtils {
 
         String code = EncryptUtils.gen(6);
 
-        redisService.put("email-" + receiver, code);
-        redisService.expireKey("email-" + receiver, 5, TimeUnit.MINUTES);
+        StringCache.INSTANCE.put("email-" + receiver, code);
+        StringCache.INSTANCE.expireKey("email-" + receiver, 5, TimeUnit.MINUTES);
 
         Context context = new Context();
         context.setVariable("message", message);
@@ -84,7 +81,7 @@ public class MailUtils {
     }
 
     public String getVerifyCode(String email) {
-        return redisService.get("email-" + email);
+        return StringCache.INSTANCE.get("email-" + email);
     }
 
     @RequiredArgsConstructor

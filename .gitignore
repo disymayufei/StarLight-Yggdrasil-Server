@@ -115,3 +115,4 @@ typings/
 install-jdk.sh
 
 application.yaml
+verifyImage

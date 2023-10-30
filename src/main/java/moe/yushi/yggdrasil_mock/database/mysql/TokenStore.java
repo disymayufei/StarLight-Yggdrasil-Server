@@ -24,7 +24,7 @@ import static moe.yushi.yggdrasil_mock.utils.UUIDUtils.randomUnsignedUUID;
 @SuppressWarnings({"SqlNoDataSourceInspection", "SqlResolve"})
 @Component
 @ConfigurationProperties(prefix = "yggdrasil.token")
-public class TokenStore {
+public final class TokenStore {
 	private JdbcTemplate jdbcTemplate;
 
 	@Autowired

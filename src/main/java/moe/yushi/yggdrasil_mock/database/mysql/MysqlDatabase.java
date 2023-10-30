@@ -27,7 +27,7 @@ import static moe.yushi.yggdrasil_mock.exception.YggdrasilException.newForbidden
 
 @SuppressWarnings("SqlNoDataSourceInspection")
 @Component
-public class MysqlDatabase implements YggdrasilDatabase {
+public final class MysqlDatabase implements YggdrasilDatabase {
 
     @Value("${database.mysql.host}")
     private String host;
@@ -92,7 +92,7 @@ public class MysqlDatabase implements YggdrasilDatabase {
     private void createUserTable() {
         String sql = "CREATE TABLE IF NOT EXISTS `YggdrasilUser` (" +
                 "`uid` BIGINT UNSIGNED AUTO_INCREMENT," +
-                "`email` VARCHAR(50) NOT NULL," +
+                "`email` VARCHAR(100)," +
                 "`uuid` VARCHAR(36) NOT NULL," +
                 "`password` TEXT NOT NULL," +
                 "`qq` BIGINT UNSIGNED," +
@@ -142,22 +142,22 @@ public class MysqlDatabase implements YggdrasilDatabase {
         return num == null ? 0 : num;
     }
 
-    public boolean addUser(String email, String uuid, String password) {
-        if (findUserByEmail(email).isEmpty()) {
-            String sql = "INSERT INTO YggdrasilUser(email, uuid, password) VALUES(?, ?, ?)";
+    public boolean addUser(long qq, String uuid, String password) {
+        if (findUserByQQ(qq).isEmpty()) {
+            String sql = "INSERT INTO YggdrasilUser(qq, uuid, password) VALUES(?, ?, ?)";
 
-            int status = jdbcTemplate.update(sql, email, uuid, password);
+            int status = jdbcTemplate.update(sql, qq, uuid, password);
             return status > 0;
         }
         else {
-            throw new UserAlreadyExistedException("This email has already exists");
+            throw new UserAlreadyExistedException("This QQ has already exists");
         }
     }
 
-    public boolean bindQQ(String email, long qq) {
-        String sql = "UPDATE YggdrasilUser SET qq=? WHERE `email`=?";
-        Integer tableNum = jdbcTemplate.queryForObject(sql, Integer.class, qq, email);
-        return tableNum != null && tableNum > 0;
+    public boolean bindEmail(long qq, String email) {
+        String sql = "UPDATE YggdrasilUser SET `email`=? WHERE `qq`=?";
+        int tableNum = jdbcTemplate.update(sql, email, qq);
+        return tableNum > 0;
     }
 
     public boolean addNewCharacter(String uuid, String name, ModelType modelType, long ownerUid) throws TooManyListenersException {
@@ -267,6 +267,32 @@ public class MysqlDatabase implements YggdrasilDatabase {
                                 ((BigInteger) result.get("uid")).longValue()
                         );
                 return Optional.of(user);
+            }
+
+        }
+        catch (EmptyResultDataAccessException e) {
+            return Optional.empty();
+        }
+
+        return Optional.empty();
+    }
+
+    public Optional<YggdrasilUser> findUserByQQ(long qq) {
+        String sql = "SELECT * FROM YggdrasilUser WHERE `qq`=?";
+        try {
+            var resultList = jdbcTemplate.queryForList(sql, qq);
+            if (!resultList.isEmpty()) {
+                var result = resultList.get(0);
+                var userResult = new YggdrasilUser(
+                        UUID.fromString((String)result.get("uuid")),
+                        (String) result.get("email"),
+                        (String) result.get("password"),
+                        ((BigInteger) result.get("uid")).longValue()
+                );
+
+                userResult.addCharacters(findCharactersByUID(userResult.getUID()));
+
+                return Optional.of(userResult);
             }
 
         }

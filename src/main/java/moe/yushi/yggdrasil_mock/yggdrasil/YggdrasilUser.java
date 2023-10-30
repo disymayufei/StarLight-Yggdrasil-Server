@@ -20,14 +20,13 @@ import static moe.yushi.yggdrasil_mock.utils.UUIDUtils.unsign;
 public class YggdrasilUser {
     @NonNull
     private UUID id;
-    @NonNull
     private String email;
     @NonNull
     private String password;
     private long uid;
     private final List<YggdrasilCharacter> characters = new CopyOnWriteArrayList<>();
 
-    public @NonNull String getEmail() {
+    public String getEmail() {
         return email;
     }
 
